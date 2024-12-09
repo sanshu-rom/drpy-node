@@ -4,7 +4,7 @@
       "key": "drpyS_PTT[优]",
       "name": "PTT[优](DS)",
       "type": 4,
-      "api": "http://192.168.31.252:5757/api/PTT[优]",
+      "api": "http://127.0.0.1:5757/api/PTT[优]",
       "searchable": 1,
       "filterable": 1,
       "quickSearch": 0,
