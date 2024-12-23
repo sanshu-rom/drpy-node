@@ -5,7 +5,7 @@
       "key": "drpyS_哔哩直播[官]",
       "name": "哔哩直播[官](DS)",
       "type": 4,
-      "api": "http://127.0.0.1:5757/api/哔哩直播[官]",
+      "api": "http://127.0.0.1:5757123/api/哔哩直播[官]",
       "searchable": 2,
       "filterable": 1,
       "quickSearch": 0,
