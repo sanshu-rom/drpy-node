@@ -213,6 +213,20 @@ export default async function handler(req, res) {
 const currentFile = path.normalize(fileURLToPath(import.meta.url)); // 使用 normalize 确保路径一致
 const indexFile = path.normalize(path.resolve(__dirname, 'index.js')); // 标准化路径
 
+// 保证 PM2 restart / stop 一定会触发
+['SIGINT', 'SIGTERM', 'SIGUSR2'].forEach(sig =>
+    process.on(sig, async () => {
+        console.log(`[${sig}] 开始优雅关闭...`);
+        try {
+            await daemon.stopDaemon();
+            console.log('Python 守护进程已停止');
+        } catch (e) {
+            console.error(e);
+        }
+        process.exit(0);
+    })
+);
+
 if (currentFile === indexFile) {
     start();
 }
