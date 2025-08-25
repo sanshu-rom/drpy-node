@@ -179,24 +179,43 @@ Use-ProxyIfNeeded -Script {
 $taskStartup = "drpyS_PM2_Startup"
 $taskUpdate  = "drpyS_Update"
 
-if (-not (Get-ScheduledTask -TaskName $taskStartup -ErrorAction SilentlyContinue)) {
-    $action  = New-ScheduledTaskAction -Execute "powershell.exe" `
-                -Argument "-NoProfile -WindowStyle Hidden -Command pm2 resurrect"
-    $trigger = New-ScheduledTaskTrigger -AtStartup -RandomDelay (New-TimeSpan -Seconds 30)
-    $setting = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName $taskStartup -Action $action -Trigger $trigger `
-        -Settings $setting -User "SYSTEM" -RunLevel Highest -Force | Out-Null
-    Write-Host "已创建开机自启任务：$taskStartup" -ForegroundColor Yellow
-}
+# 先拿 pm2 的绝对路径；拿不到就提示并跳过
+$pm2 = (Get-Command pm2.cmd -ErrorAction SilentlyContinue).Source
+if (-not $pm2) {
+    Write-Warning "找不到 pm2.cmd，跳过计划任务注册"
+} else {
+    # 强制删除旧任务（若存在）
+    $taskStartup,$taskUpdate | ForEach-Object {
+        if (Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $_ -Confirm:$false
+        }
+    }
 
-if (-not (Get-ScheduledTask -TaskName $taskUpdate -ErrorAction SilentlyContinue)) {
-    $action  = New-ScheduledTaskAction -Execute "powershell.exe" `
-                -Argument "-NoProfile -WindowStyle Hidden -Command `"& { cd '$projectPath'; git fetch origin; if (git status -uno | Select-String 'Your branch is behind') { git reset --hard origin/main; yarn --prod --silent; if (git diff HEAD^ HEAD --name-only | Select-String 'spider/py/base/requirements.txt') { python -m venv .venv; & .\.venv\Scripts\Activate.ps1; pip install -r spider\py\base\requirements.txt -q } pm2 restart drpyS } }`""
-    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Hours 24)
-    $setting = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName $taskUpdate -Action $action -Trigger $trigger `
-        -Settings $setting -User "SYSTEM" -RunLevel Highest -Force | Out-Null
-    Write-Host "已创建每 24 小时更新任务：$taskUpdate" -ForegroundColor Yellow
+    # 通用设置
+    $commonSettings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+
+    # 1) 开机自启
+    $action  = New-ScheduledTaskAction `
+        -Execute "cmd.exe" `
+        -Argument "/c `"$pm2`" resurrect"
+    $trigger = New-ScheduledTaskTrigger `
+        -AtStartup -RandomDelay (New-TimeSpan -Seconds 30)
+    Register-ScheduledTask -TaskName $taskStartup `
+        -Action $action -Trigger $trigger -Settings $commonSettings `
+        -User "SYSTEM" -RunLevel Highest -Force | Out-Null
+    Write-Host "已创建/更新开机自启任务：$taskStartup" -ForegroundColor Yellow
+
+    # 2) 每 24h 更新
+    $action  = New-ScheduledTaskAction `
+        -Execute "powershell.exe" `
+        -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"& { Set-Location '$projectPath'; git fetch origin; if (git status -uno | Select-String 'Your branch is behind') { git reset --hard origin/main; yarn --prod --silent; if (git diff HEAD^ HEAD --name-only | Select-String 'spider/py/base/requirements.txt') { python -m venv .venv; & .\.venv\Scripts\Activate.ps1; pip install -r spider\py\base\requirements.txt -q } & '$pm2' restart drpyS } }`""
+    $trigger = New-ScheduledTaskTrigger `
+        -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Hours 24)
+    Register-ScheduledTask -TaskName $taskUpdate `
+        -Action $action -Trigger $trigger -Settings $commonSettings `
+        -User "SYSTEM" -RunLevel Highest -Force | Out-Null
+    Write-Host "已创建/更新每 24 小时更新任务：$taskUpdate" -ForegroundColor Yellow
 }
 
 # ---------- 完成 ----------
