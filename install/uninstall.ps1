@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    drpys 一键卸载脚本（与安装脚本完全对应版）
+    drpys 一键卸载脚本（与安装脚本 100% 对应版，已修复）
 .DESCRIPTION
-    1) 删除任务计划  
-    2) 停止并删除 PM2 进程  
-    3) 结束残余 Node 进程  
-    4) 删除源码目录  
+    1) 删除任务计划
+    2) 停止并删除 PM2 进程
+    3) 结束残余 Node 进程
+    4) 删除源码目录
     5) 可选：卸载运行环境（Node / Python / Git / nvm / yarn / pm2）
 .PARAMETER SkipConfirm
     静默模式
@@ -22,7 +22,7 @@ param(
     [switch]$SkipConfirm,
     [switch]$IncludeEnv
 )
-$ErrorActionPreference = "Continue"   # 全局容错
+$ErrorActionPreference = "Continue"
 
 # ---------- 1. 自动提权 ----------
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -109,9 +109,9 @@ try {
     Write-Warning "删除源码目录失败，跳过..."
 }
 
-# ---------- 7. 卸载运行环境（与安装脚本 100% 对应，注册表定位卸载） ----------
+# ---------- 7. 运行环境卸载 ----------
 if ($IncludeEnv) {
-    Write-Host "开始卸载运行环境（与安装脚本完全对应）..." -ForegroundColor Yellow
+    Write-Host "开始卸载运行环境..." -ForegroundColor Yellow
 
     # 1) 卸载全局 npm 包
     try {
@@ -121,77 +121,28 @@ if ($IncludeEnv) {
         }
     } catch { Write-Warning "npm 卸载全局包失败: $($_.Exception.Message)" }
 
-    # 2) 卸载 NVM for Windows（NSIS） + Node
+    # 2) 卸载 NVM for Windows
     try {
-        $nvmReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" |
+        $nvmReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                                 "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" |
                   ForEach-Object { Get-ItemProperty $_.PSPath } |
                   Where-Object { $_.DisplayName -match "NVM for Windows" } |
                   Select-Object -First 1
         if ($nvmReg -and $nvmReg.UninstallString) {
             Write-Host "卸载 NVM for Windows ..." -ForegroundColor Green
-            Write-Host "如果弹出卸载窗口请手动确认操作 ..." -ForegroundColor Yellow
             Start-Process -FilePath $nvmReg.UninstallString -ArgumentList "/S" -Wait
+            Remove-Item -Recurse -Force "${env:ProgramFiles}\nvm" -ErrorAction SilentlyContinue
         }
-        # 强制删目录
-        $nvmDir = "${env:ProgramFiles}\nvm"
-        if (Test-Path $nvmDir) { Remove-Item -Recurse -Force $nvmDir -ErrorAction SilentlyContinue }
+        # 清理 PATH
         $envPaths = [Environment]::GetEnvironmentVariable("PATH", "Machine") -split ';'
         $clean = $envPaths | Where-Object { $_ -notmatch '\\nvm\\?' -and $_ -notmatch '\\nodejs\\?' }
         [Environment]::SetEnvironmentVariable("PATH", ($clean -join ';'), "Machine")
     } catch { Write-Warning "NVM 卸载失败: $($_.Exception.Message)" }
 
-    # ---------- 卸载 Python 3.11.9 ----------
+    # 3) 卸载 Git
     try {
-        # 1) 先杀可能占用的进程（去掉 idle）
-        'python', 'pythonw', 'pip', 'code' | ForEach-Object {
-            Get-Process $_ -ErrorAction SilentlyContinue |
-                Where-Object { $_.ProcessName -ne 'Idle' } |
-                Stop-Process -Force -ErrorAction SilentlyContinue
-        }
-
-        # 2) 找卸载命令
-        $pyReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" |
-                 ForEach-Object { Get-ItemProperty $_.PSPath } |
-                 Where-Object { $_.DisplayName -match "Python 3\.11\.9" } |
-                 Select-Object -First 1
-
-        if (-not $pyReg) {
-            Write-Host "未检测到 Python 3.11.9，跳过卸载" -ForegroundColor Green
-            return
-        }
-
-        # 3) 判断卸载方式
-        if ($pyReg.UninstallString -match '\.exe$') {
-            $exePath = $pyReg.UninstallString -replace '"', ''
-            $argList = '/passive', '/norestart'          # ← 这里改 /passive
-            $proc = Start-Process -FilePath $exePath -ArgumentList $argList -Wait -PassThru
-        } else {
-            $argList = '/X', $pyReg.PSChildName, '/passive', '/norestart'  # ← 这里改 /passive
-            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $argList -Wait -PassThru
-        }
-
-        # 4) 检查退出码
-        if ($proc.ExitCode -ne 0) {
-            Write-Warning "卸载返回码 $($proc.ExitCode)，建议重启后再继续"
-            exit $proc.ExitCode
-        }
-
-        # 5) 清理残留目录 & PATH
-        $pyDir = "C:\Python311"
-        if (Test-Path $pyDir) { Remove-Item -Recurse -Force $pyDir -ErrorAction SilentlyContinue }
-        $envPaths = [Environment]::GetEnvironmentVariable("PATH", "Machine") -split ';'
-        $clean = $envPaths | Where-Object { $_ -notmatch '\\Python311\\?' }
-        [Environment]::SetEnvironmentVariable("PATH", ($clean -join ';'), "Machine")
-
-        Write-Host "Python 3.11.9 卸载完成，可继续安装" -ForegroundColor Green
-    }
-    catch {
-         Write-Warning "卸载异常: $($_.Exception.Message)"
-    }
-
-    # 4) 卸载 Git（EXE/MSI）
-    try {
-        $gitReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" |
+        $gitReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                                "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" |
                   ForEach-Object { Get-ItemProperty $_.PSPath } |
                   Where-Object { $_.DisplayName -match "Git" } |
                   Select-Object -First 1
@@ -204,13 +155,77 @@ if ($IncludeEnv) {
         $clean = $envPaths | Where-Object { $_ -notmatch '\\Git\\cmd' -and $_ -notmatch '\\Git\\mingw64' -and $_ -notmatch '\\Git\\usr\\bin' }
         [Environment]::SetEnvironmentVariable("PATH", ($clean -join ';'), "Machine")
     } catch { Write-Warning "Git 卸载失败: $($_.Exception.Message)" }
+    
+    # 4-补) 单独卸载 Python Launcher（与主程序走同一套 Burn/WMI）
+    try {
+        $launcher = Get-CimInstance -ClassName Win32_Product -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -match '^Python Launcher' }
+        if ($launcher) {
+            Write-Host "卸载 Python Launcher ..." -ForegroundColor Green
+            (Get-WmiObject -Class Win32_Product -Filter "Name LIKE 'Python Launcher%'").Uninstall()
+        }
+    } catch { Write-Warning "Python Launcher 卸载失败: $($_.Exception.Message)" }
+    
+# ---------- 8. 通用 Python 卸载函数 ----------
+function Uninstall-Python {
+    Write-Host "正在枚举所有 Python 安装..." -ForegroundColor Yellow
 
-    Write-Host "运行环境卸载完成！建议重启计算机完成彻底清理。" -ForegroundColor Green
+    # 1) 官方 Burn 卸载器（静默）
+    $burnExes = Get-ChildItem "$env:LOCALAPPDATA\Package Cache" -Recurse -Filter "python-*.exe" -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match 'python-\d+(\.\d+)+-.*\.exe$' }
+    foreach ($exe in $burnExes) {
+        Write-Host "发现官方卸载器: $($exe.Name)" -ForegroundColor Green
+        try {
+            Start-Process -Wait -FilePath $exe.FullName -ArgumentList "/uninstall /quiet /norestart"
+            Write-Host "$($exe.Name) 卸载完成" -ForegroundColor Green
+            return   # 成功后直接结束
+        } catch {
+            Write-Warning "$($exe.Name) 卸载失败: $_"
+        }
+    }
+
+    # 2) WMI 兜底
+    $pythons = Get-CimInstance -ClassName Win32_Product -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -match '^Python\s+\d+(\.\d+)+' -or $_.Name -match '^Python Launcher' }
+    foreach ($p in $pythons) {
+        Write-Host "正在卸载 $($p.Name) ..." -ForegroundColor Yellow
+        try {
+            $wmi = Get-WmiObject -Class Win32_Product -Filter "IdentifyingNumber='$($p.IdentifyingNumber)'" -ErrorAction SilentlyContinue
+            $wmi.Uninstall() | Out-Null
+            Write-Host "$($p.Name) 卸载完成" -ForegroundColor Green
+        } catch {
+            Write-Warning "$($p.Name) 卸载失败: $_"
+        }
+    }
+
+    # 3) 残留目录
+    $pyDirs = @("$env:LOCALAPPDATA\Programs\Python", "$env:ProgramFiles\Python*",
+                "$env:ProgramFiles(x86)\Python*")
+    $pyDirs | Where-Object { Test-Path $_ } |
+              ForEach-Object { Remove-Item -Recurse -Force $_ -ErrorAction SilentlyContinue }
+
+    # 4) 清理 PATH
+    $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($userPath) {
+        $clean = $userPath -split ';' | Where-Object { $_ -notmatch '\\Python' }
+        [Environment]::SetEnvironmentVariable("PATH", ($clean -join ';'), "User")
+    }
+
+    # 5) 清理注册表根键
+    $regRoots = @("HKCU:\SOFTWARE\Python", "HKLM:\SOFTWARE\Python",
+                  "HKLM:\SOFTWARE\WOW6432Node\Python")
+    $regRoots | Where-Object { Test-Path $_ } |
+                ForEach-Object { Remove-Item -Recurse -Force $_ -ErrorAction SilentlyContinue }
 }
 
-# ---------- 8. 清理 PM2 数据 ----------
+    # 4) 通用卸载任意 Python（3.x / Launcher）
+    Uninstall-Python
+}
+
+
+# ---------- 9. 清理 PM2 数据 ----------
 try {
-    $pm2Home = "C:\$env:USERNAME\.pm2"
+    $pm2Home = "$env:USERPROFILE\.pm2"
     if (Test-Path $pm2Home) {
         Write-Host "清理 PM2 数据目录 ..." -ForegroundColor Green
         Remove-Item -Recurse -Force $pm2Home -ErrorAction SilentlyContinue
@@ -219,16 +234,15 @@ try {
     Write-Warning "清理 PM2 数据失败: $($_.Exception.Message)"
 }
 
-# ---------- 9. 删除配置文件（当前目录） ----------
-Write-Host "删除配置文件..." -ForegroundColor Green
-$confFile  = Join-Path $PSScriptRoot "drpys-update.conf"
-$pathFile  = Join-Path $PSScriptRoot "drpys-path.txt"
+# ---------- 10. 删除配置文件 ----------
+$confFile = Join-Path $PSScriptRoot "drpys-update.conf"
+$pathFile = Join-Path $PSScriptRoot "drpys-path.txt"
 Remove-Item -Path $confFile,$pathFile -Force -ErrorAction SilentlyContinue
 
-# ---------- 10. 完成 ----------
+# ---------- 11. 完成 ----------
 Write-Host "drpys 卸载完成！" -ForegroundColor Green
 if ($IncludeEnv) {
     Write-Host "已卸载所有运行环境，建议重启计算机。" -ForegroundColor Yellow
 }
-Write-Host "按任意键退出..." -ForegroundColor Green
-Read-Host
+    Write-Host "按任意键退出..." -ForegroundColor Green
+    Read-Host
